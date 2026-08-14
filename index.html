@@ -26,6 +26,20 @@
 </style>
 </head>
 <body>
+<div id="ephs-boot-status" style="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;">
+  <div style="width:min(560px,100%);padding:28px;border-radius:18px;background:#fff;box-shadow:0 12px 40px rgba(15,23,42,.12);text-align:center;">
+    <h2 style="margin:0 0 10px;font-size:22px;">Loading EPHS Portal…</h2>
+    <p style="margin:8px 0;line-height:1.5;color:#475569;">Please wait while the portal starts.</p>
+    <p id="ephs-boot-detail" style="margin:8px 0;line-height:1.5;color:#64748b;font-size:12px;word-break:break-word;"></p>
+  </div>
+</div>
+<script>
+(function(){
+  var timer=setTimeout(function(){var d=document.getElementById('ephs-boot-detail');if(d)d.textContent='The portal did not finish starting. This usually means a browser library was blocked. Refresh once.';},9000);
+  window.__EPHS_BOOT_OK__=function(){clearTimeout(timer);var s=document.getElementById('ephs-boot-status');if(s)s.remove();};
+  window.addEventListener('error',function(e){var d=document.getElementById('ephs-boot-detail');if(d&&e&&e.message)d.textContent='Startup error: '+e.message;});
+})();
+</script>
 <div id="root"></div>
 <script type="text/babel">
 const portalStyle = document.createElement("style");
@@ -118,10 +132,17 @@ function subjectsFor(data, className) {
     : SUBJECTS_DEFAULT;
 }
 
-const sb = window.supabase.createClient(
-  "https://bsobuidmfclvgalywvrr.supabase.co",
-  "sb_publishable_Qozl9ZJoYzL7B9wyIDwbYQ_HBMb57mc"
-);
+let sb = null;
+try {
+  if (window.supabase && typeof window.supabase.createClient === "function") {
+    sb = window.supabase.createClient(
+      "https://bsobuidmfclvgalywvrr.supabase.co",
+      "sb_publishable_Qozl9ZJoYzL7B9wyIDwbYQ_HBMb57mc"
+    );
+  }
+} catch (e) {
+  console.error("Supabase startup failed", e);
+}
 window.__portalLastError = null;
 function reportError(context, err) {
   const msg = err && err.message ? err.message : (typeof err === "string" ? err : JSON.stringify(err));
@@ -129,25 +150,27 @@ function reportError(context, err) {
   console.error(window.__portalLastError);
 }
 async function safeGet(key) {
+  if (!sb) {
+    try { const raw = localStorage.getItem("ephs:" + key); return raw === null ? null : JSON.parse(raw); }
+    catch (e) { reportError(`Local load failed (${key})`, e); return null; }
+  }
   try {
     const { data, error } = await sb.from("portal_kv").select("value").eq("key", key).maybeSingle();
     if (error) { reportError(`Load failed (${key})`, error); return null; }
     if (!data) return null;
     return data.value;
-  } catch (e) {
-    reportError(`Load crashed (${key})`, e);
-    return null;
-  }
+  } catch (e) { reportError(`Load crashed (${key})`, e); return null; }
 }
 async function safeSet(key, value) {
+  if (!sb) {
+    try { localStorage.setItem("ephs:" + key, JSON.stringify(value)); return true; }
+    catch (e) { reportError(`Local save failed (${key})`, e); return false; }
+  }
   try {
     const { error } = await sb.from("portal_kv").upsert({ key, value });
     if (error) { reportError(`Save failed (${key})`, error); return false; }
     return true;
-  } catch (e) {
-    reportError(`Save crashed (${key})`, e);
-    return false;
-  }
+  } catch (e) { reportError(`Save crashed (${key})`, e); return false; }
 }
 
 function Spinner() {
@@ -2354,6 +2377,7 @@ function PrintStyles() {
   );
 }
 
+window.__EPHS_BOOT_OK__ && window.__EPHS_BOOT_OK__();
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(App));
 
